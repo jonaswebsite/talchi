@@ -82,6 +82,7 @@ app.post("/api/login", asyncRoute(async (req,res) => {
   req.session.userId = r.rows[0].id; res.json({user:safeUser(r.rows[0])});
 }));
 app.post("/api/logout",(req,res)=>req.session.destroy(()=>res.json({ok:true})));
+app.get("/health",(req,res)=>res.json({ok:true}));
 app.get("/api/me",auth,(req,res)=>res.json({user:safeUser(req.user)}));
 app.get("/api/users",auth,asyncRoute(async(req,res)=>{
   const q=String(req.query.q||"").trim().replace(/^@/,"");
