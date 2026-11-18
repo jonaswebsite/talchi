@@ -8,10 +8,11 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
+  <div id="authRoot"></div>
+  <div class="app" id="mainApp" style="display:none">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark">T</div><div><b>TALCHI</b><small>Talk + Chat</small></div></div>
-      <div class="profile"><div class="avatar me">J</div><div><b>Mein Profil</b><small>Online</small></div><button class="dots" aria-label="Menü">•••</button></div>
+      <div class="profile" id="myProfile"><div class="avatar me">J</div><div><b>Mein Profil</b><small>Online</small></div><button class="dots" aria-label="Menü">•••</button></div>
       <div class="side-actions">
         <button class="action active" data-filter="all">✉️ <span>Alle Chats</span></button>
         <button class="action" data-filter="unread">🔵 <span>Ungelesen</span></button>
