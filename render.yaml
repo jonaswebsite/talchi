@@ -1,0 +1,25 @@
+databases:
+  - name: talchi-db
+    plan: free
+    region: frankfurt
+    databaseName: talchi
+    user: talchi
+
+services:
+  - type: web
+    name: talchi
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/me
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: talchi-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
