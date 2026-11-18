@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#087fbd">
+  <title>TALCHI – Talk + Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">T</div><div><b>TALCHI</b><small>Talk + Chat</small></div></div>
+      <div class="profile"><div class="avatar me">J</div><div><b>Mein Profil</b><small>Online</small></div><button class="dots" aria-label="Menü">•••</button></div>
+      <div class="side-actions">
+        <button class="action active" data-filter="all">✉️ <span>Alle Chats</span></button>
+        <button class="action" data-filter="unread">🔵 <span>Ungelesen</span></button>
+        <button class="action" data-filter="groups">👥 <span>Gruppen</span></button>
+      </div>
+      <div class="section-title">NACHRICHTEN <button id="newChat">＋</button></div>
+      <label class="search"><span>⌕</span><input id="searchInput" placeholder="Chats durchsuchen…"></label>
+      <div id="chatList" class="chat-list"></div>
+      <div class="sidebar-bottom"><span class="status-dot"></span> TALCHI Vorschau <span class="version">v1.0</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="mobile-brand"><div class="brand-mark">T</div><b>TALCHI</b></div>
+        <div class="top-actions"><button title="Anruf" id="voiceCall">☎</button><button title="Videoanruf" id="videoCall">▣</button><button title="Weitere Optionen">•••</button></div>
+      </header>
+      <section id="welcome" class="welcome">
+        <div class="welcome-icon">✦</div>
+        <h1>Schön, dass du da bist!</h1>
+        <p>Deine Gespräche. Deine Leute. Dein TALCHI.</p>
+        <button class="primary" id="welcomeNew">＋ Neuen Chat starten</button>
+        <div class="welcome-note">Dies ist eine lokale Website-Demo. Nachrichten werden nur in diesem Browser gespeichert.</div>
+      </section>
+      <section id="conversation" class="conversation hidden">
+        <div class="chat-header">
+          <div class="avatar" id="headerAvatar">M</div>
+          <div class="chat-person"><b id="headerName">Mia</b><small id="headerStatus">online</small></div>
+          <div class="header-tools"><button id="headerVoice" title="Sprachanruf">☎</button><button id="headerVideo" title="Videoanruf">▣</button></div>
+        </div>
+        <div id="messages" class="messages"></div>
+        <form id="messageForm" class="composer">
+          <button type="button" class="attach" id="attachBtn" title="Anhang">＋</button>
+          <input id="messageInput" autocomplete="off" placeholder="Nachricht schreiben…" aria-label="Nachricht">
+          <button type="button" class="emoji" id="emojiBtn" title="Emoji">☺</button>
+          <button class="send" type="submit" aria-label="Senden">➤</button>
+        </form>
+      </section>
+    </main>
+    <aside class="details" id="detailsPanel">
+      <div class="detail-art"><div class="big-orb">T</div></div>
+      <h2>Willkommen bei TALCHI</h2>
+      <p>Ein neuer Ort für deine Gespräche.</p>
+      <div class="detail-card"><span>💬</span><div><b>Einfach chatten</b><small>Schreib deinen Freunden direkt.</small></div></div>
+      <div class="detail-card"><span>🔒</span><div><b>Dein Bereich</b><small>Diese Demo speichert lokal.</small></div></div>
+      <div class="detail-card"><span>✨</span><div><b>Dein Stil</b><small>Ein Messenger mit eigener Note.</small></div></div>
+      <small class="copyright">TALCHI · Talk + Chat</small>
+    </aside>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="script.js"></script>
+</body>
+</html>
