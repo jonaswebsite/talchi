@@ -10,12 +10,13 @@ const path = require("path");
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
 const PORT = process.env.PORT || 3000;
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) throw new Error("SESSION_SECRET fehlt.");
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "32kb" }));
 app.use(session({
   store: new pgSession({ pool, createTableIfMissing: true }),
-  secret: process.env.SESSION_SECRET || "development-only-change-this-secret",
+  secret: process.env.SESSION_SECRET || "local-development-secret-only",
   resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 1000 * 60 * 60 * 24 * 14 }
 }));
@@ -77,20 +78,20 @@ app.post("/api/register", asyncRoute(async (req,res) => {
 }));
 app.post("/api/login", asyncRoute(async (req,res) => {
   const { login, password } = req.body || {};
-  const r = await pool.query("SELECT * FROM users WHERE LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1)", [String(login||"")]);
+  const r = await pool.query("SELECT * FROM users WHERE LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1)", [String(login||"").trim().replace(/^@/,"")]);
   if (!r.rowCount || !(await bcrypt.compare(String(password||""),r.rows[0].password_hash))) return res.status(401).json({error:"Anmeldedaten stimmen nicht."});
   req.session.userId = r.rows[0].id; res.json({user:safeUser(r.rows[0])});
 }));
 app.post("/api/logout",(req,res)=>req.session.destroy(()=>res.json({ok:true})));
 app.get("/health",(req,res)=>res.json({ok:true}));
-app.get("/api/me",auth,(req,res)=>res.json({user:safeUser(req.user)}));
-app.get("/api/users",auth,asyncRoute(async(req,res)=>{
+app.get("/api/me",asyncRoute(auth),(req,res)=>res.json({user:safeUser(req.user)}));
+app.get("/api/users",asyncRoute(auth),asyncRoute(async(req,res)=>{
   const q=String(req.query.q||"").trim().replace(/^@/,"");
   if(q.length<2) return res.json({users:[]});
   const r=await pool.query("SELECT id,display_name,username FROM users WHERE id<>$1 AND (username ILIKE $2 OR display_name ILIKE $2) ORDER BY username LIMIT 20",[req.user.id,"%"+q+"%"]);
   res.json({users:r.rows.map(safeUser)});
 }));
-app.get("/api/conversations",auth,asyncRoute(async(req,res)=>{
+app.get("/api/conversations",asyncRoute(auth),asyncRoute(async(req,res)=>{
   const r=await pool.query(`SELECT c.id,c.is_group,c.title,
     (SELECT json_build_object('id',u.id,'displayName',u.display_name,'username',u.username) FROM conversation_members cm2 JOIN users u ON u.id=cm2.user_id WHERE cm2.conversation_id=c.id AND cm2.user_id<>$1 LIMIT 1) AS other_user,
     (SELECT body FROM messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1) AS last_message,
@@ -99,7 +100,7 @@ app.get("/api/conversations",auth,asyncRoute(async(req,res)=>{
     ORDER BY COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id=c.id),c.created_at) DESC`,[req.user.id]);
   res.json({conversations:r.rows});
 }));
-app.post("/api/conversations",auth,asyncRoute(async(req,res)=>{
+app.post("/api/conversations",asyncRoute(auth),asyncRoute(async(req,res)=>{
   const target=Number(req.body.userId);
   if(!Number.isSafeInteger(target)||target===Number(req.user.id)) return res.status(400).json({error:"Ungültiger Nutzer."});
   const u=await pool.query("SELECT id FROM users WHERE id=$1",[target]); if(!u.rowCount)return res.status(404).json({error:"Nutzer nicht gefunden."});
@@ -109,14 +110,14 @@ app.post("/api/conversations",auth,asyncRoute(async(req,res)=>{
   await pool.query("INSERT INTO conversation_members(conversation_id,user_id) VALUES($1,$2),($1,$3)",[c.rows[0].id,req.user.id,target]);
   res.status(201).json({id:c.rows[0].id});
 }));
-app.get("/api/conversations/:id/messages",auth,asyncRoute(async(req,res)=>{
+app.get("/api/conversations/:id/messages",asyncRoute(auth),asyncRoute(async(req,res)=>{
   const id=Number(req.params.id);
   const member=await pool.query("SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2",[id,req.user.id]);
   if(!member.rowCount)return res.status(404).json({error:"Chat nicht gefunden."});
   const r=await pool.query("SELECT m.id,m.body,m.sender_id,m.created_at,u.display_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=$1 ORDER BY m.id DESC LIMIT 100",[id]);
   res.json({messages:r.rows.reverse().map(m=>({id:m.id,text:m.body,mine:String(m.sender_id)===String(req.user.id),sender:m.display_name,time:m.created_at}))});
 }));
-app.post("/api/conversations/:id/messages",auth,asyncRoute(async(req,res)=>{
+app.post("/api/conversations/:id/messages",asyncRoute(auth),asyncRoute(async(req,res)=>{
   const id=Number(req.params.id), body=String(req.body.body||"").trim();
   if(!body||body.length>4000)return res.status(400).json({error:"Nachricht muss 1–4000 Zeichen lang sein."});
   const member=await pool.query("SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2",[id,req.user.id]);
