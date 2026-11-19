@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 let me=null, conversations=[], current=null, filter="all", chats=[];
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200)}
-async function api(url,opts={}){const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opts.headers||{})},...opts});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"Etwas ist schiefgelaufen.");return data}
+async function api(url,opts={}){const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opts.headers||{})},...opts});const data=await r.json().catch(()=>({}));if(!r.ok){const error=new Error(data.error||"Etwas ist schiefgelaufen.");error.data=data;throw error;}return data}
 function authScreen(mode="login",error="",pendingEmail=""){
   const isVerify = mode === "verify";
   const isRegister = mode === "register";
@@ -47,7 +47,7 @@ ${isVerify?'<button type="button" class="resend-code" id="resendCode">Code erneu
       await boot();
     } catch(err) {
       if (mode==="login" && err.message==="E-Mail noch nicht bestätigt.") {
-        authScreen("verify","",f.get("login"));
+        authScreen("verify","",err.data?.email || f.get("login"));
       } else {
         authScreen(mode,err.message,pendingEmail);
       }
