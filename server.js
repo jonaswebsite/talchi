@@ -22,6 +22,7 @@ app.use(session({
   cookie: { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 1000 * 60 * 60 * 24 * 14 }
 }));
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 180, standardHeaders: "draft-7", legacyHeaders: false }));
+const emailRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Zu viele E-Mail-Anfragen. Bitte später erneut versuchen." } });
 
 async function initDb() {
   await pool.query(`
@@ -102,7 +103,7 @@ async function sendVerificationEmail(email, code) {
   }
 }
 
-app.post("/api/register", asyncRoute(async (req,res) => {
+app.post("/api/register", emailRateLimit, asyncRoute(async (req,res) => {
   const { displayName, username, email, password, phone } = req.body || {};
   const normalizedEmail = normalizeEmail(email);
   if (!displayName || !username || !normalizedEmail || !password) return res.status(400).json({error:"Bitte Name, Benutzername, E-Mail und Passwort ausfüllen."});
@@ -164,7 +165,7 @@ app.post("/api/verify-email", asyncRoute(async (req,res) => {
   res.json({user:safeUser(user.rows[0])});
 }));
 
-app.post("/api/resend-code", asyncRoute(async (req,res) => {
+app.post("/api/resend-code", emailRateLimit, asyncRoute(async (req,res) => {
   const email = normalizeEmail(req.body?.email);
   if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Bitte gib eine gültige E-Mail-Adresse ein."});
   const user = await pool.query("SELECT id FROM users WHERE email=$1 AND email_verified=FALSE", [email]);
@@ -190,7 +191,7 @@ app.post("/api/login", asyncRoute(async (req,res) => {
   const { login, password } = req.body || {};
   const r = await pool.query("SELECT * FROM users WHERE LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1)", [String(login||"").trim().replace(/^@/,"")]);
   if (!r.rowCount || !(await bcrypt.compare(String(password||""),r.rows[0].password_hash))) return res.status(401).json({error:"Anmeldedaten stimmen nicht."});
-  if (!r.rows[0].email_verified) return res.status(403).json({error:"E-Mail noch nicht bestätigt."});
+  if (!r.rows[0].email_verified) return res.status(403).json({error:"E-Mail noch nicht bestätigt.",email:r.rows[0].email});
   req.session.userId = r.rows[0].id; res.json({user:safeUser(r.rows[0])});
 }));
 app.post("/api/logout",(req,res)=>req.session.destroy(()=>res.json({ok:true})));
