@@ -3,9 +3,10 @@
 TALCHI ist ein Messenger-Projekt. Konten funktionieren ohne Telefonnummer.
 
 ## Funktionen
-- Registrierung mit Anzeigename, Benutzername, E-Mail und Passwort
+- Registrierung mit Anzeigename, Benutzername und Passwort – E-Mail ist optional
+- Konto ohne E-Mail wird direkt aktiviert; bei angegebener E-Mail wird ein Bestätigungscode versendet
 - Telefonnummer ist optional und wird nicht öffentlich angezeigt
-- Anmeldung mit E-Mail oder Benutzername
+- Anmeldung mit Benutzername oder (falls hinterlegt) E-Mail
 - Suche nach Benutzernamen/Anzeigenamen
 - Private Chats und Nachrichten mit PostgreSQL-Speicherung
 - Sitzungen über sichere HTTP-only-Cookies
