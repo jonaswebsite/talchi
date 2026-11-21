@@ -10,13 +10,13 @@ function authScreen(mode="login",error="",pendingEmail=""){
 <div class="auth-screen"><div class="auth-card">
 <div class="auth-brand"><div class="brand-mark">T</div><div><b>TALCHI</b><small>Talk + Chat</small></div></div>
 <h1>${isVerify?"Bestätige deine E-Mail":(mode==="login"?"Willkommen zurück!":"Erstelle dein TALCHI-Konto")}</h1>
-<p>${isVerify?"Wir haben einen sechsstelligen Code an deine E-Mail-Adresse gesendet.": "Chatte mit Menschen über ihren Benutzernamen. Eine Telefonnummer brauchst du nicht."}</p>
+<p>${isVerify?"Wir haben einen sechsstelligen Code an deine E-Mail-Adresse gesendet.":(isRegister?"E-Mail ist optional. Du kannst dich nur mit Benutzername und Passwort registrieren.":"Melde dich mit Benutzername oder E-Mail und Passwort an.")}</p>
 ${isVerify?"":'<div class="auth-tabs"><button id="tabLogin" class="'+(mode==="login"?"active":"")+'">Anmelden</button><button id="tabRegister" class="'+(mode==="register"?"active":"")+'">Registrieren</button></div>'}
 <form id="authForm" class="auth-form">
 ${isVerify
   ? '<label>E-Mail-Adresse<input name="email" type="email" value="'+escapeHtml(pendingEmail)+'" readonly required></label><label>6-stelliger Code<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456" required></label>'
   : (isRegister?'<label>Anzeigename<input name="displayName" maxlength="40" placeholder="Dein Name" required></label><label>Benutzername<input name="username" maxlength="24" placeholder="z. B. jonas123" pattern="[A-Za-z0-9_]{3,24}" required></label>':'')
-    + '<label>'+(mode==="login"?"E-Mail oder Benutzername":"E-Mail-Adresse")+'<input name="login" type="'+(mode==="login"?"text":"email")+'" placeholder="'+(mode==="login"?"name oder @benutzername":"du@example.com")+'" required></label><label>Passwort<input name="password" type="password" minlength="8" placeholder="Mindestens 8 Zeichen" required></label>'
+    + (isRegister?'<label>E-Mail-Adresse (optional)<input name="email" type="email" placeholder="Kann leer bleiben"></label>':'<label>Benutzername oder E-Mail<input name="login" type="text" placeholder="@benutzername oder E-Mail" required></label>')+'<label>Passwort<input name="password" type="password" minlength="8" placeholder="Mindestens 8 Zeichen" required></label>'
     + (isRegister?'<label>Telefonnummer (optional)<input name="phone" type="tel" placeholder="Kann leer bleiben"></label>':'')}
 <p class="auth-error">${escapeHtml(error)}</p><button class="primary" type="submit">${isVerify?"Code bestätigen":(mode==="login"?"Anmelden":"Konto erstellen")}</button>
 </form>
@@ -38,7 +38,7 @@ ${isVerify?'<button type="button" class="resend-code" id="resendCode">Code erneu
       }
       const payload=mode==="login"
         ? {login:f.get("login"),password:f.get("password")}
-        : {displayName:f.get("displayName"),username:f.get("username"),email:f.get("login"),password:f.get("password"),phone:f.get("phone")};
+        : {displayName:f.get("displayName"),username:f.get("username"),email:f.get("email")||"",password:f.get("password"),phone:f.get("phone")};
       const result=await api("/api/"+(mode==="login"?"login":"register"),{method:"POST",body:JSON.stringify(payload)});
       if (result.verificationRequired) {
         authScreen("verify","",result.email);
