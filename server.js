@@ -6,7 +6,6 @@ const pgSession = require("connect-pg-simple")(session);
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const path = require("path");
-const crypto = require("crypto");
 
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
@@ -22,29 +21,19 @@ app.use(session({
   cookie: { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 1000 * 60 * 60 * 24 * 14 }
 }));
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 180, standardHeaders: "draft-7", legacyHeaders: false }));
-const emailRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Zu viele E-Mail-Anfragen. Bitte später erneut versuchen." } });
-
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       display_name VARCHAR(40) NOT NULL,
       username VARCHAR(24) NOT NULL UNIQUE,
-      email VARCHAR(254) UNIQUE,
       password_hash TEXT NOT NULL,
-      phone VARCHAR(30),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE;
-    ALTER TABLE users ALTER COLUMN email_verified SET DEFAULT TRUE;
-    CREATE TABLE IF NOT EXISTS email_verification_codes (
-      email VARCHAR(254) PRIMARY KEY,
-      code_hash TEXT NOT NULL,
-      expires_at TIMESTAMPTZ NOT NULL,
-      attempts INTEGER NOT NULL DEFAULT 0,
-      last_sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+    ALTER TABLE users DROP COLUMN IF EXISTS email;
+    ALTER TABLE users DROP COLUMN IF EXISTS phone;
+    ALTER TABLE users DROP COLUMN IF EXISTS email_verified;
+    DROP TABLE IF EXISTS email_verification_codes;
     CREATE TABLE IF NOT EXISTS conversations (
       id BIGSERIAL PRIMARY KEY,
       is_group BOOLEAN NOT NULL DEFAULT FALSE,
@@ -75,130 +64,27 @@ async function auth(req,res,next) {
   req.user = r.rows[0]; next();
 }
 const asyncRoute = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
-const normalizeEmail = value => String(value || "").trim().toLowerCase();
-const codeHash = (email, code) => crypto.createHash("sha256")
-  .update(email + ":" + code + ":" + (process.env.SESSION_SECRET || "local-development-secret-only"))
-  .digest("hex");
-
-async function sendVerificationEmail(email, code) {
-  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
-    throw new Error("Der E-Mail-Versand ist noch nicht eingerichtet.");
-  }
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer " + process.env.RESEND_API_KEY,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      from: process.env.EMAIL_FROM,
-      to: [email],
-      subject: "Dein TALCHI-Bestätigungscode",
-      text: "Dein TALCHI-Code lautet: " + code + "\n\nDer Code ist 10 Minuten gültig. Wenn du dich nicht registriert hast, ignoriere diese E-Mail.",
-      html: "<div style='font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;color:#173247'><h1 style='color:#087fbd'>TALCHI</h1><h2>Bestätige deine E-Mail-Adresse</h2><p>Dein sechsstelliger Bestätigungscode:</p><div style='font-size:34px;font-weight:bold;letter-spacing:9px;padding:18px 0;color:#087fbd'>" + code + "</div><p>Der Code ist 10 Minuten gültig.</p><p style='color:#718394;font-size:12px'>Wenn du dich nicht bei TALCHI registriert hast, kannst du diese E-Mail ignorieren.</p></div>"
-    })
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    console.error("Resend email error:", response.status, detail.slice(0, 500));
-    throw new Error("Die Bestätigungsmail konnte nicht gesendet werden.");
-  }
-}
-
-app.post("/api/register", emailRateLimit, asyncRoute(async (req,res) => {
-  const { displayName, username, email, password, phone } = req.body || {};
-  const normalizedEmail = email ? normalizeEmail(email) : "";
+app.post("/api/register", asyncRoute(async (req,res) => {
+  const { displayName, username, password } = req.body || {};
   if (!displayName || !username || !password) return res.status(400).json({error:"Bitte Name, Benutzername und Passwort ausfüllen."});
-  if (String(displayName).trim().length > 40 || !/^[a-zA-Z0-9_]{3,24}$/.test(String(username)) || (normalizedEmail && !/^\S+@\S+\.\S+$/.test(normalizedEmail)) || String(password).length < 8 || String(password).length > 128)
+  if (String(displayName).trim().length > 40 || !/^[a-zA-Z0-9_]{3,24}$/.test(String(username)) || String(password).length < 8 || String(password).length > 128)
     return res.status(400).json({error:"Prüfe deine Angaben. Benutzername: 3–24 Zeichen (Buchstaben, Zahlen, _), Passwort: mindestens 8 Zeichen."});
-
   const hash = await bcrypt.hash(password, 12);
-  let user;
   try {
-    const r = await pool.query(
-      "INSERT INTO users(display_name,username,email,password_hash,phone,email_verified) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,display_name,username",
-      [String(displayName).trim(),String(username).toLowerCase(),normalizedEmail || null,hash,phone ? String(phone).trim().slice(0,30) : null,!normalizedEmail]
-    );
-    user = r.rows[0];
+    const r = await pool.query("INSERT INTO users(display_name,username,password_hash) VALUES($1,$2,$3) RETURNING id,display_name,username", [String(displayName).trim(),String(username).toLowerCase(),hash]);
+    req.session.userId = r.rows[0].id;
+    return res.status(201).json({user:safeUser(r.rows[0])});
   } catch(e) {
-    if(e.code==="23505") return res.status(409).json({error:"E-Mail oder Benutzername ist bereits vergeben."});
+    if(e.code==="23505") return res.status(409).json({error:"Dieser Benutzername ist bereits vergeben."});
     throw e;
-  }
-
-  if (!normalizedEmail) {
-    req.session.userId = user.id;
-    return res.status(201).json({user:safeUser(user),emailRequired:false});
-  }
-
-  const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
-  try {
-    await pool.query(
-      "INSERT INTO email_verification_codes(email,code_hash,expires_at,attempts,last_sent_at) VALUES($1,$2,NOW()+INTERVAL '10 minutes',0,NOW()) ON CONFLICT(email) DO UPDATE SET code_hash=EXCLUDED.code_hash,expires_at=EXCLUDED.expires_at,attempts=0,last_sent_at=NOW()",
-      [normalizedEmail, codeHash(normalizedEmail, code)]
-    );
-    await sendVerificationEmail(normalizedEmail, code);
-  } catch(e) {
-    await pool.query("DELETE FROM email_verification_codes WHERE email=$1", [normalizedEmail]).catch(()=>{});
-    await pool.query("DELETE FROM users WHERE id=$1 AND email_verified=FALSE", [user.id]).catch(()=>{});
-    return res.status(503).json({error:e.message || "E-Mail-Versand derzeit nicht möglich."});
-  }
-  res.status(202).json({verificationRequired:true,email:normalizedEmail});
-}));
-
-app.post("/api/verify-email", asyncRoute(async (req,res) => {
-  const email = normalizeEmail(req.body?.email);
-  const code = String(req.body?.code || "").trim();
-  if (!/^\S+@\S+\.\S+$/.test(email) || !/^\d{6}$/.test(code)) {
-    return res.status(400).json({error:"Bitte gib deine E-Mail-Adresse und den sechsstelligen Code ein."});
-  }
-  const result = await pool.query("SELECT code_hash,expires_at,attempts FROM email_verification_codes WHERE email=$1", [email]);
-  if (!result.rowCount) return res.status(400).json({error:"Kein gültiger Code gefunden. Bitte fordere einen neuen Code an."});
-  const record = result.rows[0];
-  if (new Date(record.expires_at).getTime() < Date.now()) {
-    await pool.query("DELETE FROM email_verification_codes WHERE email=$1", [email]);
-    return res.status(400).json({error:"Der Code ist abgelaufen. Bitte fordere einen neuen an."});
-  }
-  if (record.attempts >= 5) return res.status(429).json({error:"Zu viele Versuche. Bitte fordere einen neuen Code an."});
-  const expected = Buffer.from(record.code_hash, "hex");
-  const actual = Buffer.from(codeHash(email, code), "hex");
-  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
-    await pool.query("UPDATE email_verification_codes SET attempts=attempts+1 WHERE email=$1", [email]);
-    return res.status(400).json({error:"Der Code ist nicht richtig. Bitte prüfe ihn und versuche es erneut."});
-  }
-  const user = await pool.query("UPDATE users SET email_verified=TRUE WHERE email=$1 RETURNING id,display_name,username", [email]);
-  if (!user.rowCount) return res.status(400).json({error:"Konto nicht gefunden. Bitte registriere dich erneut."});
-  await pool.query("DELETE FROM email_verification_codes WHERE email=$1", [email]);
-  req.session.userId = user.rows[0].id;
-  res.json({user:safeUser(user.rows[0])});
-}));
-
-app.post("/api/resend-code", emailRateLimit, asyncRoute(async (req,res) => {
-  const email = normalizeEmail(req.body?.email);
-  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Bitte gib eine gültige E-Mail-Adresse ein."});
-  const user = await pool.query("SELECT id FROM users WHERE email=$1 AND email_verified=FALSE", [email]);
-  if (!user.rowCount) return res.json({ok:true});
-  const previous = await pool.query("SELECT last_sent_at FROM email_verification_codes WHERE email=$1", [email]);
-  if (previous.rowCount && Date.now() - new Date(previous.rows[0].last_sent_at).getTime() < 60000) {
-    return res.status(429).json({error:"Bitte warte eine Minute, bevor du einen neuen Code anforderst."});
-  }
-  const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
-  await pool.query(
-    "INSERT INTO email_verification_codes(email,code_hash,expires_at,attempts,last_sent_at) VALUES($1,$2,NOW()+INTERVAL '10 minutes',0,NOW()) ON CONFLICT(email) DO UPDATE SET code_hash=EXCLUDED.code_hash,expires_at=EXCLUDED.expires_at,attempts=0,last_sent_at=NOW()",
-    [email, codeHash(email, code)]
-  );
-  try {
-    await sendVerificationEmail(email, code);
-    res.json({ok:true});
-  } catch(e) {
-    res.status(503).json({error:e.message || "E-Mail-Versand derzeit nicht möglich."});
   }
 }));
 
 app.post("/api/login", asyncRoute(async (req,res) => {
-  const { login, password } = req.body || {};
-  const r = await pool.query("SELECT * FROM users WHERE LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1)", [String(login||"").trim().replace(/^@/,"")]);
-  if (!r.rowCount || !(await bcrypt.compare(String(password||""),r.rows[0].password_hash))) return res.status(401).json({error:"Anmeldedaten stimmen nicht."});
-  if (!r.rows[0].email_verified) return res.status(403).json({error:"E-Mail noch nicht bestätigt.",email:r.rows[0].email});
+  const { username, password } = req.body || {};
+  const normalizedUsername = String(username||"").trim().replace(/^@/,"").toLowerCase();
+  const r = await pool.query("SELECT * FROM users WHERE LOWER(username)=LOWER($1)", [normalizedUsername]);
+  if (!r.rowCount || !(await bcrypt.compare(String(password||""),r.rows[0].password_hash))) return res.status(401).json({error:"Benutzername oder Passwort stimmen nicht."});
   req.session.userId = r.rows[0].id; res.json({user:safeUser(r.rows[0])});
 }));
 app.post("/api/logout",(req,res)=>req.session.destroy(()=>res.json({ok:true})));
