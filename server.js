@@ -30,12 +30,14 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       display_name VARCHAR(40) NOT NULL,
       username VARCHAR(24) NOT NULL UNIQUE,
-      email VARCHAR(254) NOT NULL UNIQUE,
+      email VARCHAR(254) UNIQUE,
       password_hash TEXT NOT NULL,
       phone VARCHAR(30),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE users ALTER COLUMN email_verified SET DEFAULT TRUE;
     CREATE TABLE IF NOT EXISTS email_verification_codes (
       email VARCHAR(254) PRIMARY KEY,
       code_hash TEXT NOT NULL,
@@ -105,22 +107,27 @@ async function sendVerificationEmail(email, code) {
 
 app.post("/api/register", emailRateLimit, asyncRoute(async (req,res) => {
   const { displayName, username, email, password, phone } = req.body || {};
-  const normalizedEmail = normalizeEmail(email);
-  if (!displayName || !username || !normalizedEmail || !password) return res.status(400).json({error:"Bitte Name, Benutzername, E-Mail und Passwort ausfüllen."});
-  if (String(displayName).trim().length > 40 || !/^[a-zA-Z0-9_]{3,24}$/.test(String(username)) || !/^\S+@\S+\.\S+$/.test(normalizedEmail) || String(password).length < 8 || String(password).length > 128)
+  const normalizedEmail = email ? normalizeEmail(email) : "";
+  if (!displayName || !username || !password) return res.status(400).json({error:"Bitte Name, Benutzername und Passwort ausfüllen."});
+  if (String(displayName).trim().length > 40 || !/^[a-zA-Z0-9_]{3,24}$/.test(String(username)) || (normalizedEmail && !/^\S+@\S+\.\S+$/.test(normalizedEmail)) || String(password).length < 8 || String(password).length > 128)
     return res.status(400).json({error:"Prüfe deine Angaben. Benutzername: 3–24 Zeichen (Buchstaben, Zahlen, _), Passwort: mindestens 8 Zeichen."});
 
   const hash = await bcrypt.hash(password, 12);
   let user;
   try {
     const r = await pool.query(
-      "INSERT INTO users(display_name,username,email,password_hash,phone,email_verified) VALUES($1,$2,$3,$4,$5,FALSE) RETURNING id,display_name,username",
-      [String(displayName).trim(),String(username).toLowerCase(),normalizedEmail,hash,phone ? String(phone).trim().slice(0,30) : null]
+      "INSERT INTO users(display_name,username,email,password_hash,phone,email_verified) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,display_name,username",
+      [String(displayName).trim(),String(username).toLowerCase(),normalizedEmail || null,hash,phone ? String(phone).trim().slice(0,30) : null,!normalizedEmail]
     );
     user = r.rows[0];
   } catch(e) {
     if(e.code==="23505") return res.status(409).json({error:"E-Mail oder Benutzername ist bereits vergeben."});
     throw e;
+  }
+
+  if (!normalizedEmail) {
+    req.session.userId = user.id;
+    return res.status(201).json({user:safeUser(user),emailRequired:false});
   }
 
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
